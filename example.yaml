@@ -1,0 +1,410 @@
+# Example ESPHome configuration for the pentair external component.
+#
+# Wiring: connect an RS-485 transceiver (e.g. MAX3485 / ADM2483) to a UART.
+# If your transceiver needs an explicit driver-enable (DE/RE) line, wire it to
+# a GPIO and set `flow_control_pin`. Auto-direction transceivers can omit it.
+
+esphome:
+  name: pentair-bridge
+
+esp32:
+  board: esp32dev
+
+logger:
+  # The pentair bus uses UART0 pins on some boards; keep hardware logger off
+  # that UART or use a different UART for the bus.
+  baud_rate: 0
+
+api:
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+uart:
+  id: bus_uart
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 9600
+  # Pentair RS-485 is 8N2.
+  stop_bits: 2
+
+pentair:
+  uart_id: bus_uart
+  source_address: 0x10
+  flow_control_pin: GPIO4        # DE/RE line; omit for auto-direction transceivers
+  poll_interval: 16s             # idle status cadence (matches IntelliCenter's 16 s default)
+  active_poll_interval: 2s       # cadence while a pump is running/being commanded
+  require_pump_flow: true         # gate chlorination on a pump actually running
+  pumps:
+    - id: pool_pump
+      address: 0x60               # pump 1
+      pump_type: VSF
+      mode: speed                 # VSF only: speed (RPM) or flow (GPM)
+  chlorinators:
+    - id: swg
+      address: 0x50
+  heaters:
+    - id: pool_heater
+      heater_type: mastertemp     # ultratemp | hybrid | mastertemp | max_e_therm | eti250
+      address: 0x70
+    - id: heat_pump
+      heater_type: ultratemp      # UltraTemp heat pumps ARE commandable over the bus (see select:)
+      address: 0x72
+    - id: hybrid_heater
+      heater_type: hybrid         # Hybrid (gas + heat pump) IS commandable over the bus (see select:/number:)
+      address: 0x74
+  intellichems:
+    - id: chem
+      address: 0x90               # IntelliChem device address (no firmware default; set to your unit)
+
+number:
+  - platform: pentair
+    type: setpoint
+    pump_id: pool_pump
+    name: "Pool Pump Speed"
+    unit_of_measurement: "RPM"
+    min_value: 450
+    max_value: 3450
+    step: 10
+  - platform: pentair
+    type: output
+    chlorinator_id: swg
+    name: "SWG Output"
+    unit_of_measurement: "%"
+
+  # IntelliChem setpoint writes (cmd 0x92, firmware binder FUN_0096f3bc). Each
+  # write resends all seven config fields, so a value is only sent once a status
+  # reply has populated the current values (untouched fields keep their value).
+  # These control acid/chlorine dosing on the IntelliChem, so treat as opt-in.
+  - platform: pentair
+    type: ph_setpoint
+    intellichem_id: chem
+    name: "IntelliChem pH Setpoint"
+    unit_of_measurement: "pH"
+  - platform: pentair
+    type: orp_setpoint
+    intellichem_id: chem
+    name: "IntelliChem ORP Setpoint"
+    unit_of_measurement: "mV"
+  - platform: pentair
+    type: calcium_hardness
+    intellichem_id: chem
+    name: "IntelliChem Calcium Hardness"
+    unit_of_measurement: "ppm"
+  - platform: pentair
+    type: cyanuric_acid
+    intellichem_id: chem
+    name: "IntelliChem Cyanuric Acid"
+    unit_of_measurement: "ppm"
+  - platform: pentair
+    type: total_alkalinity
+    intellichem_id: chem
+    name: "IntelliChem Total Alkalinity"
+    unit_of_measurement: "ppm"
+
+  # Hybrid heat-pump command fields (firmware FUN_0097b558). Set Point and
+  # heat-source config are pushed to the heat pump on the poll frame once a mode
+  # is selected. hybrid_param is the payload[3]/0xf38c byte (firmware clamps it
+  # to [5,60], default 15). It is an unlabelled but wire-proven field.
+  - platform: pentair
+    type: hybrid_setpoint
+    heater_id: hybrid_heater
+    name: "Hybrid Set Point"
+    unit_of_measurement: "°F"
+  - platform: pentair
+    type: hybrid_boost
+    heater_id: hybrid_heater
+    name: "Hybrid Boost"
+    unit_of_measurement: "°F"
+  - platform: pentair
+    type: hybrid_param
+    heater_id: hybrid_heater
+    name: "Hybrid Parameter (token 0xf38c)"
+
+switch:
+  - platform: pentair
+    pump_id: pool_pump
+    name: "Pool Pump Run"
+  # Feature circuits: local relays the ESP drives directly, the same way the
+  # IntelliCenter OCP switches its AUX/feature relays (over its internal I2C
+  # relay bus, NOT over RS-485). These do not use the bus at all.
+  - platform: pentair
+    type: circuit
+    name: "Pool Circuit"
+    id: pool_circuit
+    pin: GPIO25
+  - platform: pentair
+    type: circuit
+    name: "Spa Circuit"
+    id: spa_circuit
+    pin: GPIO26
+  - platform: pentair
+    type: circuit
+    name: "Heat Source (Fireman)"
+    id: heat_source_fireman
+    pin: GPIO27
+  - platform: pentair
+    type: circuit
+    name: "Pool Light"
+    id: pool_light
+    pin: GPIO32
+    egg_timer: 4h                  # auto-off after 4 hours, like an IntelliCenter egg timer
+    freeze_sensor: air_temp        # force on for freeze protection
+    freeze_threshold: 3.3          # °C (~38 °F)
+
+sensor:
+  - platform: pentair
+    type: rpm
+    pump_id: pool_pump
+    name: "Pool Pump RPM"
+    unit_of_measurement: "RPM"
+  - platform: pentair
+    type: gpm
+    pump_id: pool_pump
+    name: "Pool Pump Flow"
+    unit_of_measurement: "GPM"
+  - platform: pentair
+    type: watts
+    pump_id: pool_pump
+    name: "Pool Pump Power"
+    unit_of_measurement: "W"
+    device_class: power
+  - platform: pentair
+    type: salt
+    chlorinator_id: swg
+    name: "Salt"
+    unit_of_measurement: "ppm"
+  # Heater telemetry (the OCP polls each heater and parses its reply). Gas
+  # heaters are status-only; the Ultra/Hybrid heat pumps also accept a mode
+  # command over the bus (see the select: block below).
+  - platform: pentair
+    type: heater_mode
+    heater_id: pool_heater
+    name: "Heater Mode"
+  - platform: pentair
+    type: heater_status
+    heater_id: pool_heater
+    name: "Heater Status"
+  # IntelliChem chemistry telemetry (read-only; firmware-proven 0x12 layout).
+  - platform: pentair
+    type: ph
+    intellichem_id: chem
+    name: "IntelliChem pH"
+    accuracy_decimals: 2
+  - platform: pentair
+    type: orp
+    intellichem_id: chem
+    name: "IntelliChem ORP"
+    unit_of_measurement: "mV"
+  - platform: pentair
+    type: ph_setpoint
+    intellichem_id: chem
+    name: "IntelliChem pH Setpoint"
+    accuracy_decimals: 2
+  - platform: pentair
+    type: orp_setpoint
+    intellichem_id: chem
+    name: "IntelliChem ORP Setpoint"
+    unit_of_measurement: "mV"
+  - platform: pentair
+    type: ph_tank
+    intellichem_id: chem
+    name: "IntelliChem pH Tank Level"
+  - platform: pentair
+    type: orp_tank
+    intellichem_id: chem
+    name: "IntelliChem ORP Tank Level"
+  - platform: pentair
+    type: saturation_index
+    intellichem_id: chem
+    name: "IntelliChem Saturation Index"
+    accuracy_decimals: 2
+  - platform: pentair
+    type: calcium_hardness
+    intellichem_id: chem
+    name: "IntelliChem Calcium Hardness"
+    unit_of_measurement: "ppm"
+  - platform: pentair
+    type: cyanuric_acid
+    intellichem_id: chem
+    name: "IntelliChem Cyanuric Acid"
+    unit_of_measurement: "ppm"
+  - platform: pentair
+    type: total_alkalinity
+    intellichem_id: chem
+    name: "IntelliChem Total Alkalinity"
+    unit_of_measurement: "ppm"
+  # Temperature inputs for the body thermostat + freeze protection. IntelliCenter
+  # reads these from local analog sensors (not RS-485), so wire your own to the
+  # ESP (e.g. DS18B20) and replace these placeholder templates.
+  - platform: template
+    id: water_temp
+    name: "Pool Water Temp"
+    unit_of_measurement: "°C"
+    lambda: "return NAN;"
+    update_interval: 30s
+  - platform: template
+    id: air_temp
+    name: "Air Temp"
+    unit_of_measurement: "°C"
+    lambda: "return NAN;"
+    update_interval: 30s
+
+# Heat-pump mode command (UltraTemp only). Selecting a mode latches an
+# RS-485 command that the hub packs into the heat pump's next poll frame
+# (payload[0]=0x90, payload[1]=mode;). Gas heaters and the Hybrid ignore it.
+select:
+  - platform: pentair
+    heater_id: heat_pump
+    name: "Heat Pump Mode"       # type defaults to "mode" (Off / Heating / Cooling)
+
+  # A Hybrid heat pump is driven by BOTH a mode (Off/Heating/Cooling) and a
+  # heat-source selection (Heat Pump Only / Gas Heater Only / Hybrid Mode /
+  # Dual Mode). Selecting a mode latches the command onto the poll frame.
+  - platform: pentair
+    type: mode
+    heater_id: hybrid_heater
+    name: "Hybrid Mode"
+  - platform: pentair
+    type: heating_mode
+    heater_id: hybrid_heater
+    name: "Hybrid Heat Source"
+
+# Body thermostat. Mirrors IntelliCenter heat control: it compares the body
+# water temperature to the setpoint/mode and drives the heat-source ("fireman")
+# relay circuit. It does NOT command the heater over RS-485 (the bus heater is
+# status-only). Temperatures use °C per ESPHome's climate convention.
+climate:
+  - platform: pentair
+    name: "Pool"
+    sensor: water_temp
+    heat_circuit: heat_source_fireman   # requires a feature circuit with this id
+    body_circuit: pool_circuit          # optional: only heat while the body is on
+    hysteresis: 0.5
+    visual_min_temperature: 18.0
+    visual_max_temperature: 40.0
+
+
+binary_sensor:
+  - platform: pentair
+    type: comm
+    pump_id: pool_pump
+    name: "Pool Pump Comm"
+  - platform: pentair
+    type: priming
+    pump_id: pool_pump
+    name: "Pool Pump Priming"
+  - platform: pentair
+    type: pump_alarm
+    pump_id: pool_pump
+    name: "Pool Pump Alarm"
+  # Per-bit fault breakout of the pump alarm word (the aggregate "Pool Pump
+  # Alarm" above says SOMETHING faulted; these say WHICH).
+  - platform: pentair
+    type: pump_high_temp
+    pump_id: pool_pump
+    name: "Pool Pump High Temp"
+  - platform: pentair
+    type: pump_prime_error
+    pump_id: pool_pump
+    name: "Pool Pump Prime Error"
+  - platform: pentair
+    type: pump_over_temp
+    pump_id: pool_pump
+    name: "Pool Pump Over Temp"
+  - platform: pentair
+    type: pump_power_error
+    pump_id: pool_pump
+    name: "Pool Pump Power Error"
+  - platform: pentair
+    type: pump_over_current
+    pump_id: pool_pump
+    name: "Pool Pump Over Current"
+  - platform: pentair
+    type: pump_over_voltage
+    pump_id: pool_pump
+    name: "Pool Pump Over Voltage"
+  - platform: pentair
+    type: pump_unknown_alarm
+    pump_id: pool_pump
+    name: "Pool Pump Unknown Alarm"
+  - platform: pentair
+    type: comm
+    chlorinator_id: swg
+    name: "SWG Comm"
+  - platform: pentair
+    type: flow
+    chlorinator_id: swg
+    name: "SWG Flow"
+  - platform: pentair
+    type: no_flow
+    chlorinator_id: swg
+    name: "SWG No Flow Alarm"
+  - platform: pentair
+    type: low_salt
+    chlorinator_id: swg
+    name: "SWG Low Salt"
+  - platform: pentair
+    type: very_low_salt
+    chlorinator_id: swg
+    name: "SWG Very Low Salt"
+  - platform: pentair
+    type: clean_cell
+    chlorinator_id: swg
+    name: "SWG Inspect Cell"
+  - platform: pentair
+    type: cold_water
+    chlorinator_id: swg
+    name: "SWG Cold Water Cutoff"
+  - platform: pentair
+    type: comm
+    heater_id: pool_heater
+    name: "Heater Comm"
+  - platform: pentair
+    type: heater_fault
+    heater_id: pool_heater
+    name: "Heater Fault"
+  - platform: pentair
+    type: comm
+    intellichem_id: chem
+    name: "IntelliChem Comm"
+
+text_sensor:
+  - platform: pentair
+    heater_id: pool_heater
+    name: "Heater Detail"
+  # Named heater fault reason. Firmware-decoded for the Fenwal gas heaters
+  # (max_e_therm / eti250); heat-pump subtypes report "OK"/"Fault" (see raw
+  # error_a/error_b sensors for the undecoded bytes).
+  - platform: pentair
+    type: fault_reason
+    heater_id: pool_heater
+    name: "Heater Fault Reason"
+  # Raw 0x12 reply payload (hex), kept as a diagnostic alongside the decoded
+  # chemistry sensors above (useful for inspecting undecoded trailing bytes).
+  - platform: pentair
+    intellichem_id: chem
+    name: "IntelliChem Reply"
+  # Named IntelliChem alarms / warnings and per-doser run state (decoded
+  # from reply bytes 32-35; requires a reply payload of at least 36 bytes).
+  - platform: pentair
+    type: alarms
+    intellichem_id: chem
+    name: "IntelliChem Alarms"
+  - platform: pentair
+    type: warnings
+    intellichem_id: chem
+    name: "IntelliChem Warnings"
+  - platform: pentair
+    type: ph_dosing_status
+    intellichem_id: chem
+    name: "IntelliChem pH Dosing"
+  - platform: pentair
+    type: orp_dosing_status
+    intellichem_id: chem
+    name: "IntelliChem ORP Dosing"

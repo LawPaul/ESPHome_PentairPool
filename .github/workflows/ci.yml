@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  protocol-tests:
+    name: Protocol golden-vector tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run host tests
+        run: ./test/run.sh
+
+  esphome-config:
+    name: ESPHome config validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ESPHome
+        run: pip install esphome
+      - name: Validate example config
+        run: |
+          cp secrets.yaml.example secrets.yaml
+          esphome config example.yaml
