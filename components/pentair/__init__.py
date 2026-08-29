@@ -73,11 +73,14 @@ CONF_HEATERS = "heaters"
 CONF_INTELLICHEMS = "intellichems"
 CONF_PUMP_TYPE = "pump_type"
 CONF_HEATER_TYPE = "heater_type"
+CONF_MIN_FLOW = "min_flow"
 
 
 def _validate_pump(config):
     if config[CONF_PUMP_TYPE] != "VSF" and CONF_MODE in config:
         raise cv.Invalid("'mode' is only valid for VSF pumps")
+    if CONF_MIN_FLOW in config and config[CONF_PUMP_TYPE] not in ("VSF", "VF"):
+        raise cv.Invalid("'min_flow' is only valid for flow-capable pumps (VSF, VF)")
     return config
 
 
@@ -86,7 +89,8 @@ PUMP_SCHEMA = cv.Schema(
         cv.Required(CONF_ID): cv.declare_id(PentairPump),
         cv.Optional(CONF_ADDRESS, default=0x60): cv.hex_uint8_t,
         cv.Required(CONF_PUMP_TYPE): cv.enum(PUMP_TYPES, upper=True),
-        cv.Optional(CONF_MODE, default="speed"): cv.enum(PUMP_MODES, lower=True),
+        cv.Optional(CONF_MODE): cv.enum(PUMP_MODES, lower=True),
+        cv.Optional(CONF_MIN_FLOW): cv.int_range(min=1, max=140),
     }
 ).add_extra(_validate_pump)
 
@@ -159,7 +163,9 @@ async def to_code(config):
         await cg.register_component(pump, pump_conf)
         cg.add(pump.set_address(pump_conf[CONF_ADDRESS]))
         cg.add(pump.set_pump_type(pump_conf[CONF_PUMP_TYPE]))
-        cg.add(pump.set_mode(pump_conf[CONF_MODE]))
+        cg.add(pump.set_mode_initial(pump_conf.get(CONF_MODE, PUMP_MODES["speed"])))
+        if CONF_MIN_FLOW in pump_conf:
+            cg.add(pump.set_min_flow(pump_conf[CONF_MIN_FLOW]))
         cg.add(var.register_pump(pump))
 
     for chlor_conf in config.get(CONF_CHLORINATORS, []):

@@ -236,6 +236,15 @@ static void test_setpoint_encoding() {
   encode_setpoint(PUMP_TYPE_VF, PUMP_MODE_FLOW, 999, cmd, d);
   check_bytes("VF clamp high -> 140", d, {0x02, 0xE4, 0x00, 0x8C});
 
+  // The optional flow floor is an explicit per-pump override. Omitting it
+  // above preserves the firmware-derived 20 GPM default.
+  encode_setpoint(PUMP_TYPE_VSF, PUMP_MODE_FLOW, 1, cmd, d, 10);
+  check_bytes("VSF custom flow floor -> 10", d, {0x03, 0x27, 0x00, 0x0A});
+  encode_setpoint(PUMP_TYPE_VF, PUMP_MODE_FLOW, 1, cmd, d, 15);
+  check_bytes("VF custom flow floor -> 15", d, {0x02, 0xE4, 0x00, 0x0F});
+  encode_setpoint(PUMP_TYPE_VSF, PUMP_MODE_SPEED, 1, cmd, d, 10);
+  check_bytes("flow floor does not alter RPM floor", d, {0x03, 0x27, 0x01, 0xC2});
+
   // VF feature/menu select frame (cmd 5, payload 0x06) the OCP sends to VF
   // pumps in the drive batch (firmware VF setupMessages + binder FUN_0096baf0).
   // @0x60: sum(A5 00 60 10 05 01 06) = 0x0121 -> 01 21.

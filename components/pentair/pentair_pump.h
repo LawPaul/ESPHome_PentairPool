@@ -16,7 +16,14 @@ class PentairPump : public Component {
 
   void set_address(uint8_t address) { this->address_ = address; }
   void set_pump_type(PumpType type) { this->type_ = type; }
-  void set_mode(PumpMode mode) { this->mode_ = mode; }
+  void set_mode_initial(PumpMode mode) { this->mode_ = mode; }
+  void set_mode(PumpMode mode) {
+    if (mode != this->mode_)
+      this->pending_ = true;
+    this->mode_ = mode;
+  }
+  PumpMode mode() const { return this->mode_; }
+  void set_min_flow(uint16_t gpm) { this->min_flow_ = gpm; }
 
   uint8_t address() const { return this->address_; }
   PumpType pump_type() const { return this->type_; }
@@ -74,6 +81,7 @@ class PentairPump : public Component {
   uint8_t address_{ADDR_PUMP_BASE};
   PumpType type_{PUMP_TYPE_VSF};
   PumpMode mode_{PUMP_MODE_SPEED};
+  uint16_t min_flow_{GPM_MIN};
 
   uint16_t target_{0};
   bool run_{false};

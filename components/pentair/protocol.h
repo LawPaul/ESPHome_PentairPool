@@ -906,9 +906,12 @@ static const uint16_t GPM_MIN = 20, GPM_MAX = 140;
 
 // Clamp a target to the pump's native unit range (RPM for VS / VSF-speed,
 // GPM for VF / VSF-flow).
-inline uint16_t clamp_setpoint(PumpType type, PumpMode mode, uint16_t target) {
+// `flow_min` overrides only the GPM floor; the default remains the
+// firmware-derived 20 GPM for backward-compatible, OCP-faithful behavior.
+inline uint16_t clamp_setpoint(PumpType type, PumpMode mode, uint16_t target,
+                               uint16_t flow_min = GPM_MIN) {
   bool is_flow = (type == PUMP_TYPE_VF) || (type == PUMP_TYPE_VSF && mode == PUMP_MODE_FLOW);
-  uint16_t lo = is_flow ? GPM_MIN: RPM_MIN;
+  uint16_t lo = is_flow ? flow_min: RPM_MIN;
   uint16_t hi = is_flow ? GPM_MAX: RPM_MAX;
   if (target < lo)
     target = lo;
@@ -921,8 +924,8 @@ inline uint16_t clamp_setpoint(PumpType type, PumpMode mode, uint16_t target) {
 // per-generation register selector prefix followed by the clamped value
 // (BE16 for VS/VSF, low byte for VF). VS/VF use cmd 1, VSF uses cmd 9.
 inline void encode_setpoint(PumpType type, PumpMode mode, uint16_t target, uint8_t &cmd,
-                            std::vector<uint8_t> &data) {
-  uint16_t v = clamp_setpoint(type, mode, target);
+                            std::vector<uint8_t> &data, uint16_t flow_min = GPM_MIN) {
+  uint16_t v = clamp_setpoint(type, mode, target, flow_min);
   data.clear();
   switch (type) {
     case PUMP_TYPE_VS:  // cmd 1, register 02 C4, BE16 RPM

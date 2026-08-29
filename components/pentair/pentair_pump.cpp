@@ -19,11 +19,11 @@ void PentairPump::dump_config() {
 }
 
 uint16_t PentairPump::clamp_setpoint_() const {
-  return clamp_setpoint(this->type_, this->mode_, this->target_);
+  return clamp_setpoint(this->type_, this->mode_, this->target_, this->min_flow_);
 }
 
 void PentairPump::build_setpoint(uint8_t &cmd, std::vector<uint8_t> &data) const {
-  encode_setpoint(this->type_, this->mode_, this->target_, cmd, data);
+  encode_setpoint(this->type_, this->mode_, this->target_, cmd, data, this->min_flow_);
 }
 
 void PentairPump::on_status(const PumpStatus &st) {

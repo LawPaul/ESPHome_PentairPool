@@ -45,6 +45,7 @@ pentair:
       address: 0x60               # pump 1
       pump_type: VSF
       mode: speed                 # VSF only: speed (RPM) or flow (GPM)
+      min_flow: 10                # optional VSF/VF GPM floor; ignored in RPM mode
   chlorinators:
     - id: swg
       address: 0x50

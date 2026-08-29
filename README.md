@@ -181,7 +181,7 @@ Pull the component straight from GitHub (recommended):
 
 ```yaml
 external_components:
-  - source: github://LawPaul/ESPHome_PentairPool@v1.0.0
+  - source: github://LawPaul/ESPHome_PentairPool@v1.1.0
     components: [pentair]
 ```
 
@@ -212,7 +212,7 @@ See `example.yaml` for a complete configuration.
 | `active_poll_interval` | `2s` | Cadence while a pump is running or being commanded |
 | `tx_gap` | `60ms` | Minimum spacing between frames |
 | `require_pump_flow` | `true` | Gate chlorination on a running pump |
-| `pumps` | none | List of pumps (`id`, `address`, `pump_type`, `mode`) |
+| `pumps` | none | List of pumps (`id`, `address`, `pump_type`, `mode`, optional `min_flow`) |
 | `chlorinators` | none | List of chlorinators (`id`, `address`) |
 | `heaters` | none | List of heaters (`id`, `heater_type`, `address`) |
 | `intellichems` | none | List of IntelliChem units (`id`, `address`) |
@@ -221,6 +221,12 @@ See `example.yaml` for a complete configuration.
 `eti250` (this selects the firmware poll cadence and request/reply command
 codes). IntelliChem `address` is required: there is no firmware-fixed default,
 so set it to your unit's bus address.
+
+For flow-capable `VSF` and `VF` pumps, optional `min_flow` changes the GPM
+setpoint floor from the firmware-derived default of 20 GPM. Valid values are
+1–140 GPM. This is an experimental opt-in: a pump may enforce a higher minimum
+internally even when the component transmits a lower target. It has no effect
+on RPM mode and is rejected for `VS` pumps.
 
 ### Entity platforms
 
